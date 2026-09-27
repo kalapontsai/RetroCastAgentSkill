@@ -24,7 +24,6 @@ A: [build body, run analyze, run export forecast]
    - F2 退休存活率：96.3%（最早破產 72 歲）
    - 最佳化狀態：SUCCESS
    
-   報告：/home/bt994846/.openclaw/workspace/repos/RetroCast/data/reports/kadela_portfolio_forecast_20260927_004502.html
    要不要也產 rebalance 報告？
 ```
 

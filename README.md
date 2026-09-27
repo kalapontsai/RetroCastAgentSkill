@@ -138,7 +138,7 @@ RetroCast/
 
 - **計算與判斷分離**：所有計算（蒙地卡羅、回測、最佳化）在 `lib/`，CLI 與 agent 只做欄位收集與結果 relay
 - **JSON in / JSON out**：body shape 與 Flask API 1:1，未來切換 HTTP 框架無痛
-- **byte-level 等價**：CLI 產出與 Flask 報告**完全相同**（除生成時間戳）
+- **(歷史)** v1.1 時期 CLI 產出曾與 Flask 報告 byte-level 等價（除生成時間戳）；2026-09-27 起 Flask dev copy 已移除，skill 獨立演進，無需再維護對等性
 - **不對外通訊**：不送 email、不推文、不下單——純分析工具
 
 ## License

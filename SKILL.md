@@ -182,13 +182,13 @@ agent 看到這幾個**不要當真 bug 追**：
 ## 環境前置（v1.2）
 
 - **Skill root**：`~/.openclaw/agents/main/agent/workshop-skills/retrocast/`（**唯一**依賴——所有檔案都在這裡）
-- **不再需要** `/workspace/repos/RetroCast/` 或 `/mnt/d/stock/RetroCast/`。`/repos/RetroCast/` 保留作為 git 開發拷貝（HEAD `6bff1f9`），skill 與之脫鉤可獨立運作
+- **不再需要** `/workspace/repos/RetroCast/`（dev copy 已於 2026-09-27 trash 移除）或 `/mnt/d/stock/RetroCast/`（frozen，保留為 Apache fallback）
 - **FinMind token 三段式載入優先序**：
   1. **OpenClaw secrets `FINMIND_TOKEN`**（首選，audit + runtime 一致）
   2. `~/.config/retrocast/finmind-token`（legacy 本地橋接，chmod 600）
   3. env var `FINMIND_TOKEN`（CI / testing 友善）
 - **Python 3.14.4 venv**：skill-internal `.venv/`；CLI 自動偵測並 re-exec
-- **byte-level 驗證**：skill-internal CLI 產出與 `/repos/RetroCast/` 產出 0 byte diff（僅「生成時間」timestamp 不同）
+- **(歷史)** v1.1 時期曾以 byte-level diff 驗證 skill CLI 產出與 Flask 主線報告 0 byte 差異（僅「生成時間」timestamp 不同）；2026-09-27 起 dev copy 已移除，skill 獨立演進
 
 ## 首次安裝（agent 引導 SOP，v1.3.3）
 

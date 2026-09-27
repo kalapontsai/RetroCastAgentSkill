@@ -1,6 +1,6 @@
 {
   "_doc": "RetroCast inquiry form v1.3 — 複製此檔為 form.json，編輯下方「## Form Values」後執行 retrocast_cli.py analyze -i form.json -o result.json",
-  "_schema_ref": "完整欄位說明見 references/input-schema.md；對照原 Flask UI 在 /workspace/repos/RetroCast/templates/index.html (form#fAnalyze)",
+  "_schema_ref": "完整欄位說明見 references/input-schema.md",
 
   "_field_docs": {
     "profile": "[必填] user_profile/<name>.csv 的 stem (不含 .csv)。例: 'kadela'。可用 retrocast_cli.py profiles 列出所有。",
@@ -53,8 +53,7 @@
     "1. 複製此檔: cp user_profile/_form_template.json form.json",
     "2. 編輯下方「## Form Values」區塊(通常只改 profile / n / v2_*)",
     "3. CLI 跑分析: retrocast_cli.py analyze -i form.json -o result.json",
-    "4. CLI 產報告: retrocast_cli.py export -r result.json -t forecast",
-    "或用原 Flask UI 跑: cd /workspace/repos/RetroCast && python scripts/run_dev.sh"
+    "4. CLI 產報告: retrocast_cli.py export -r result.json -t forecast"
   ],
 
   "_## Form Values": "以下欄位會傳給 analyze() 的 body。'_' 開頭的欄位 (上方) 是中繼資料,會被忽略。",

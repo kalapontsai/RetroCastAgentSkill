@@ -1,10 +1,24 @@
-# RetroCast
+# RetroCast Agent Skill
 
-> **對話式驅動的台股投資組合歷史回測與退休存活率分析工具**
+> **對話式驅動的台股投資組合歷史回測與退休存活率分析工具（Flask-free CLI）**
 >
-> Flask-free、self-contained、純 CLI + Jinja2 模板；所有計算透過 FinMind v4 API 取得台股歷史價格。
+> 本 repo 是 `kalapontsai/RetroCast` (Flask app 主線) 的獨立 skill 分支，專給 OpenClaw agent 透過 subprocess 呼叫。
+> Flask UI 仍在 [RetroCast main](https://github.com/kalapontsai/RetroCast/tree/main) 維護，兩個 repo 同步發展。
 
-[![Python](https://img.shields.io/badge/python-3.14-blue.svg)](https://www.python.org/) [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Repo](https://img.shields.io/badge/repo-kalapontsai%2FRetroCastAgentSkill-blue)](https://github.com/kalapontsai/RetroCastAgentSkill)
+[![Version](https://img.shields.io/badge/version-v1.3.3-blue)](https://github.com/kalapontsai/RetroCastAgentSkill/blob/main/CHANGELOG.md)
+[![Python](https://img.shields.io/badge/python-3.14+-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![FinMind](https://img.shields.io/badge/data-FinMind%20v4-orange)](https://finmindtrade.com/)
+[![Flask](https://img.shields.io/badge/Flask-free-green)]()
+
+## 相關 repo
+
+| Repo | Branch | 用途 |
+|---|---|---|
+| **[kalapontsai/RetroCastAgentSkill](https://github.com/kalapontsai/RetroCastAgentSkill)** (本 repo) | `main` | Agent skill (CLI 入口,Flask-free,JSON envelope) |
+| [kalapontsai/RetroCast](https://github.com/kalapontsai/RetroCast) | `main` | Flask app UI (網頁表單 + 視覺化) |
+| [kalapontsai/RetroCast](https://github.com/kalapontsai/RetroCast) | `agent-skill` (已刪除) | 原始 skill branch,已凍起來獨立成新 repo |
 
 ## 為什麼 RetroCast
 

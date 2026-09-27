@@ -80,6 +80,7 @@ CLI 內建 venv auto-bootstrap（偵測到 pandas 不可用時自動用 `.venv/b
 
 ### 路徑 A：對話式（推薦，較不容易打錯）
 
+0. **持股來源驗證**（**僅在使用者提到「目前/現況 stock_hold」等 source-of-truth 觸發詞時執行**）→ 從 stock_hold `/holdings` 拉當下持股，跟候選 profile 的 `preview` 比對；若任一 ticker 股數不同、或 stock_hold 多了新 ticker，把 diff 列出來問使用者「重用舊 profile（資料較舊）／建新 profile（推薦 `<name>_YYYY-MM-DD` 保留歷史）？」——**絕不要在沒有讓使用者決策的情況下直接覆寫舊 profile**。
 1. **列出 profiles** → `retrocast_cli.py profiles` → 給使用者看可用選項
 2. **確認輸入** → 詢問必要欄位（profile、n 年、退休參數），其他用預設
 3. **建構 body JSON** → 參考 `references/input-schema.md`，注意 %→decimal 換算
@@ -162,6 +163,14 @@ form 純輸出（無 `--output`）直接印 JSON 到 stdout，可 pipe `> form.j
 ```
 
 常見 code：`TOKEN_MISSING` / `PROFILE_NOT_FOUND` / `INVALID_INPUT` / `TICKER_NOT_FOUND` / `FINMIND_ERROR` / `RENDER_FAILED`
+
+## 已知問題 / Caveats（v1.2 良性，不會讓 analyze 失敗）
+
+agent 看到這幾個**不要當真 bug 追**：
+
+- **[fixed in v1.3.4 commit]** 原 `_build_monthly_tickers` 在某些呼叫鏈會丟 `WARNING:portfolio_forecast:_build_monthly_tickers 失敗:compute_monthly_returns_by_ticker() takes 1 positional argument but 3 were given`，導致 forecast 報告 §② 歷史真實績效明細表呈現空白。改走 `compute_monthly_returns_via_shares_tracking` (3-arg + window) 並回傳 unwrapped `tickers` list 後已修。若在舊版本上看到這個 warning 跟空白表，就是這條 bug。
+- **`current_assets_NT$` ≠ stock_hold `total_assets`**：retrocast 用 FinMind 當下收盤算市值；stock_hold `current_price` 來自使用者最後一次 `POST /prices` 上傳，沒上傳過時 `current_price = avg_cost` 導致 `unrealized_pl=0`，市值看起來錯。relay summary 時並列兩個數字並註明落差來源，避免使用者誤判。
+- **`upload-profile` SameFileError**：若 CSV 已放在 `user_profile/<name>.csv`，又對該路徑跑 `upload-profile` 會丟 `shutil.SameFileError`（non-fatal 但 traceback 會污染輸出）。workaround：先寫到 `/tmp/<name>.csv` 再 upload，或直接 `preview <name>` 驗證（檔案已在 `user_profile/` 就是合法 profile）。
 
 ## 不做的事
 

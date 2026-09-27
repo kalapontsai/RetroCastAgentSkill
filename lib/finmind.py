@@ -71,8 +71,12 @@ def _load_finmind_token_from_openclaw() -> str:
     """OpenClaw secrets 讀 FINMIND_TOKEN。
     subprocess 失敗 → 回空字串（呼叫端繼續往下個 source）。
 
-    輸出格式是 env-style assignment: 'FINMIND_TOKEN=<value>'(含尾端換行)
-    不是單純 value。須 split('=') 取右半才不會送到 FinMind 變成 'Token is illegal'。
+    OpenClaw 輸出兩個問題都要處理:
+    1. 格式是 env-style assignment: 'FINMIND_TOKEN=<value>' (含尾端換行)
+       → split('=', 1)[1] 取右半才不是 'KEY=VALUE' 字串
+    2. 'secrets store get' env-kind 只回 preview (例 'eyJ0eX…RlnQ', 11 字 + Unicode 省略號)
+       → 偵測到 '…' 或長度 < 50 就當作 redacted,讓呼叫端 fallback 到 ~/.config/retrocast/finmind-token
+       (那邊存的是完整 169-byte JWT,因為是本地檔寫入而非 CLI preview)
     """
     try:
         result = subprocess.run(
@@ -81,8 +85,10 @@ def _load_finmind_token_from_openclaw() -> str:
         )
         output = result.stdout.strip()
         if '=' in output:
-            # 'FINMIND_TOKEN=eyJ...' → 'eyJ...'
-            return output.split('=', 1)[1].strip()
+            output = output.split('=', 1)[1].strip()
+        # 偵測 redacted preview (含 Unicode 省略號 '…' 或長度明顯不對)
+        if '…' in output or len(output) < 50:
+            return ''  # 留空,讓 load_finmind_token() 走下一個 source
         return output
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return ''

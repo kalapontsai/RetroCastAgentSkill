@@ -1,7 +1,7 @@
 """app_config.py — 路徑 / 設定常數"""
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = Path(__file__).resolve().parent.parent  # v1.3: scripts/ 是子目錄,往上一層才到 skill root
 DATA_DIR = ROOT_DIR / 'data'
 PRICE_CACHE_DIR = DATA_DIR / 'price_cache'
 REPORTS_DIR = DATA_DIR / 'reports'

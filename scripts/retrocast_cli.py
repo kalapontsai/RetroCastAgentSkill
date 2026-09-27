@@ -35,8 +35,11 @@ from datetime import datetime
 from pathlib import Path
 
 # Repo paths — must come before app import so relative imports resolve
-REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent  # v1.3: scripts/ 為 app.py + app_config.py 所在
+SKILL_ROOT = SCRIPTS_DIR.parent             # v1.3: skill root 用於 .venv 路徑
+REPO_ROOT = SKILL_ROOT                      # 兼容舊變數名
+sys.path.insert(0, str(SCRIPTS_DIR))       # v1.3: 給 app, app_config
+sys.path.insert(0, str(SKILL_ROOT))           # v1.3: 給 lib package
 
 # Silence app.py's chatty debug logger — it writes DEBUG to stdout on import,
 # polluting our JSON output. app.py keeps its own file handlers (debug.log,
@@ -57,8 +60,8 @@ if _VENV_PY.exists():
 # Import Flask app module — its module-level code only defines functions,
 # `create_app()` is only called via `if __name__ == '__main__'` so importing
 # has no side effects beyond registering the Flask app object.
-from app import _run_analyze, _check_import  # noqa: E402
-from app_config import USER_PROFILE_DIR, REPORTS_DIR  # noqa: E402
+from app import _run_analyze, _check_import  # noqa: E402  # v1.3: scripts/app.py
+from app_config import USER_PROFILE_DIR, REPORTS_DIR  # noqa: E402  # v1.3: scripts/app_config.py
 from lib.exporter import render_html_report, render_rebalance_report  # noqa: E402
 from lib.finmind import load_finmind_token  # noqa: E402
 
@@ -276,7 +279,6 @@ _INQUIRY_FORM_TEMPLATE = {
     "v2_withdrawal_inflation": 0.03,
     "v2_pension_monthly": 0.0,
     "v2_pension_inflation": 0.02,
-    "v2_horizon_years": None,
     "v2_risk_free_rate": 0.015,
     # 一次性支出: [{"year_offset": 5, "amount": 1000000, "label": "房屋裝修"}]
     "v2_special_expenses": [],

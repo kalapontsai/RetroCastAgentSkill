@@ -69,13 +69,21 @@ def _parse_key_value_file(path: Path) -> dict:
 
 def _load_finmind_token_from_openclaw() -> str:
     """OpenClaw secrets 讀 FINMIND_TOKEN。
-    subprocess 失敗 → 回空字串（呼叫端繼續往下個 source）。"""
+    subprocess 失敗 → 回空字串（呼叫端繼續往下個 source）。
+
+    輸出格式是 env-style assignment: 'FINMIND_TOKEN=<value>'(含尾端換行)
+    不是單純 value。須 split('=') 取右半才不會送到 FinMind 變成 'Token is illegal'。
+    """
     try:
         result = subprocess.run(
             ['openclaw', 'secrets', 'store', 'get', 'FINMIND_TOKEN'],
             capture_output=True, text=True, check=True, timeout=5,
         )
-        return result.stdout.strip()
+        output = result.stdout.strip()
+        if '=' in output:
+            # 'FINMIND_TOKEN=eyJ...' → 'eyJ...'
+            return output.split('=', 1)[1].strip()
+        return output
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return ''
 

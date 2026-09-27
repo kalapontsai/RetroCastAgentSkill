@@ -71,7 +71,7 @@ CLI 內建 venv auto-bootstrap（偵測到 pandas 不可用時自動用 `.venv/b
 | 上傳 CSV | `retrocast_cli.py upload-profile <csv-path>` |
 | 健康檢查 | `retrocast_cli.py health [--v2]` |
 | **輸出 inquiry form 範本** | `retrocast_cli.py form [--output PATH] [--profile NAME]` |
-| 主分析 | `retrocast_cli.py analyze -i <body.json> [-o <result.json>]` |
+| 主分析 | `retrocast_cli.py analyze -i <file_path> [-o <result.json>]` **⚠️ -i 必為檔案路徑，絕不可接 inline JSON** |
 | 產 HTML 報告 | `retrocast_cli.py export -r <result.json> -t forecast\|rebalance` |
 
 完整欄位定義見 `references/input-schema.md`，對話流程範本見 `references/workflow.md`。
@@ -85,7 +85,7 @@ CLI 內建 venv auto-bootstrap（偵測到 pandas 不可用時自動用 `.venv/b
 2. **確認輸入** → 詢問必要欄位（profile、n 年、退休參數），其他用預設
 3. **建構 body JSON** → 參考 `references/input-schema.md`，注意 %→decimal 換算
 4. **跑 analyze** → `analyze -i body.json -o result.json` → 取 `summary` 區塊
-5. **（選擇性）產報告** → `export -r result.json -t forecast` 或 `rebalance`
+5. **產報告** → `export -r result.json -t forecast`（預設）或 `rebalance`，**此步為 workflow 强制條件**
 6. **回報使用者** → 用 `summary` 區塊數字 + 報告絕對路徑
 
 ### 路徑 B：預填式（使用者直接編輯 form.json）
@@ -165,6 +165,10 @@ form 純輸出（無 `--output`）直接印 JSON 到 stdout，可 pipe `> form.j
 常見 code：`TOKEN_MISSING` / `PROFILE_NOT_FOUND` / `INVALID_INPUT` / `TICKER_NOT_FOUND` / `FINMIND_ERROR` / `RENDER_FAILED`
 
 ## 已知問題 / Caveats（v1.2 良性，不會讓 analyze 失敗）
+
+**待修補（流程完整性）**：
+
+- **[ISSUE: workflow 缺少 HTML 報告]** 標準工作流程第 5 步「（選擇性）產報告」應改為**强制步驟**——`export -r result.json -t forecast` 必須執行並回報報告路徑，否則使用者看不到可攜帶的 HTML 輸出。2026-09-27 Kala 執行 0050+0056 回測時遺漏此步，後補 `export` 才生成 `/home/bt994846/.openclaw/agents/main/agent/workshop-skills/retrocast/data/reports/kadela_portfolio_forecast_20260927_115152.html`。
 
 agent 看到這幾個**不要當真 bug 追**：
 

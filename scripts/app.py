@@ -760,16 +760,59 @@ def _validate_wrapper(_unused):
 
 
 def _build_monthly_tickers(holdings, client, start_date, end_date, n_years, dividends_by_ticker, splits_by_ticker):
-    """每月逐年報酬表（給 card ⑥ 用）"""
+    """每月逐年報酬表（給 card ⑥ 用）
+
+    v3.0.4 P0 fix: 走 compute_monthly_returns_via_shares_tracking（fresh-start-per-month），
+    與「一.6 per_stock_n_year_window」同源算法，確保「N 年月報酬連乘」 == 「N 年 total return」。
+    修正先前呼叫 1-arg 版 compute_monthly_returns_by_ticker 但傳 3 個 args 導致 silent 失敗的 bug。
+    """
     try:
-        rows_by_ticker = {}
+        rows_by_ticker: dict[str, list[dict]] = {}
         for h in holdings:
             sid = h.ticker
             try:
-                rows_by_ticker[sid] = client.get_stock_price(sid, start_date, end_date)
+                rows = client.get_stock_price(sid, start_date, end_date)
             except FinMindError:
-                rows_by_ticker[sid] = []
-        return compute_monthly_returns_by_ticker(rows_by_ticker, dividends_by_ticker, splits_by_ticker)
+                rows = []
+            if rows:
+                rows_by_ticker[sid] = rows
+        if not rows_by_ticker:
+            logger.warning('_build_monthly_tickers: 全部 holdings 都抓不到 price rows')
+            return {}
+
+        # 整理成 raw_pivot: DataFrame index=Date, columns=Ticker, values=raw close
+        per_ticker_df = []
+        for ticker, rows in rows_by_ticker.items():
+            df = pd.DataFrame(rows)
+            if df.empty or 'date' not in df.columns or 'close' not in df.columns:
+                continue
+            df['date'] = pd.to_datetime(df['date'])
+            per_ticker_df.append(
+                df.set_index('date').sort_index()[['close']].rename(columns={'close': ticker})
+            )
+        if not per_ticker_df:
+            logger.warning('_build_monthly_tickers: 整理後 pivot 為空（price row 缺少 date/close 欄）')
+            return {}
+        raw_pivot = pd.concat(per_ticker_df, axis=1).sort_index()
+
+        # N 年窗口：與 exporter fallback 對齊，以 max_date 往回推 N 年
+        window_end_ts = raw_pivot.index.max()
+        window_end = window_end_ts.strftime('%Y-%m-%d')
+        window_start = None
+        if n_years and n_years > 0:
+            window_start = (window_end_ts - pd.DateOffset(years=n_years)).strftime('%Y-%m-%d')
+
+        result = compute_monthly_returns_via_shares_tracking(
+            raw_pivot,
+            dividends_by_ticker or {},
+            splits_by_ticker or {},
+            window_start=window_start,
+            window_end=window_end,
+        )
+        # 回傳 unwrapped tickers list（lib.exporter._get_monthly_tickers 預期 list[dict]，
+        # 而不是 wrapper {'tickers': [...]}；wrapper 形式會讓 exporter 把 dict 的 keys 當
+        # tickers 迭代、tk.get('data') 直接炸）
+        return result.get('tickers', [])
     except Exception as e:
         logger.warning(f'_build_monthly_tickers 失敗:{e}')
         return {}

@@ -25,10 +25,15 @@ import requests
 # ───────── Constants ─────────
 FINMIND_API_BASE = 'https://api.finmindtrade.com/api/v4/data'
 RATE_LIMIT_MS = 200
-# 30 天 TTL（v3.0.2 改）：配合 end_date 預設為「前一個月最後一天」的概念。
-# 歷史回測只看月 K 層級的價格,一個月內資料不會變,24h TTL 太短會每天重抓。
-# 跨月會自然 cache miss (因為 end_date 變了 → covers check 不過 → 補抓一個月)
-PRICE_CACHE_TTL_SECONDS = 30 * 86400  # 30 days
+# 90 天 TTL（v3.1.0 改）：配合 end_date 預設為「前一個月最後一天」的概念。
+# 歷史回測只看月 K 層級的價格,90 天內封閉資料的 close / adj_close / first_trading_day /
+# dividend 都不會變。30 天 TTL 在跨季跑 analyze 仍會 cache miss → 重抓單月資料,
+# 既浪費 FinMind 配額也拖慢 analyze。改 90 天主要是季底 end_date 微漂移時仍能命中,
+# 跨月新增的自然補抓(月內補抓邏輯保留,確保新期間資料仍會 fetch)。
+# 唯一失效場景:除權除息公告時(年中/年末),期內會短暫 staleness,但
+# price_adj cache 與 dividend cache 是寫後即算(timestamp=time.time()),新公告
+# 後 24-48h 內若有 analyze 仍會抓到;非緊急分析情境下 90 天足以涵蓋。
+PRICE_CACHE_TTL_SECONDS = 90 * 86400  # 90 days
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -310,9 +315,18 @@ class FinMindClient:
     # ────────── TaiwanStockInfo：上市櫃總覽 + 預先驗證 ──────────
     STOCK_LIST_CACHE_FILE = None  # 設在 __init__（需要 path）
 
-    def get_stock_list(self, use_cache: bool = True, ttl: int = 86400) -> list[dict]:
+    # 上市櫃股票清單 cache TTL：7 天（v3.1.0 改）。
+    # 上市/下市事件頻率極低(每年個位數),名單異動才需要重抓；24h 對這條資料太短會每天重抓，
+    # 改 7 天足以涵蓋日常 analyze use case。
+    DEFAULT_STOCK_LIST_TTL_SECONDS = 7 * 86400  # 7 days
+
+    def get_stock_list(
+        self,
+        use_cache: bool = True,
+        ttl: int = DEFAULT_STOCK_LIST_TTL_SECONDS,
+    ) -> list[dict]:
         """
-        全上市櫃股票清單（24h cache）。
+        全上市櫃股票清單（7d cache, v3.1.0 從 24h 加長）。
         每檔回傳 {stock_id, stock_name, industry_category, type, date}，
         date 是 FinMind 把該檔納入清單的日期。
         用來：

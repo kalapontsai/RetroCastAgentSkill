@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`PRICE_CACHE_TTL_SECONDS`**（`lib/finmind.py`）:30 天 → **90 天**。
+  配合 `end_date` 預設取「前一月最後一天」，跨季微漂移時仍能命中快取，月 K 級別的歷史價 / 還原除權息價 / 股利 / first_trading_day 共用此 TTL。
+- **`get_stock_list()` 預設 `ttl`**：`86400` (24h) → **`7 * 86400` (7d)**。
+  上市 / 下市事件頻率低於年頻率，7 天足以涵蓋日常 analyze use case，避免每天重抓一次 stock list。
+  兩條 cache 同時延長後，預期 analyze 在週/月級週期內零 FinMind 重抓，僅在跨月 / 跨季 / 新增標的時自然補抓。
+
 ## [1.2.0] - 2026-09-27
 
 ### Changed (Breaking)

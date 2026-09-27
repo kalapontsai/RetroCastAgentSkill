@@ -181,47 +181,57 @@ form 純輸出（無 `--output`）直接印 JSON 到 stdout，可 pipe `> form.j
 - **Python 3.14.4 venv**：skill-internal `.venv/`；CLI 自動偵測並 re-exec
 - **byte-level 驗證**：skill-internal CLI 產出與 `/repos/RetroCast/` 產出 0 byte diff（僅「生成時間」timestamp 不同）
 
-## 首次安裝（agent 引導 SOP）
+## 首次安裝（agent 引導 SOP，v1.3.3）
 
-**情境 A — Token 還沒設定（v1.2 推薦路徑）**：
+**關鍵**：OpenClaw secrets `store get` 在 env-kind 模式下只回 redacted preview（`eyJ0eX…RlnQ`,11 chars + Unicode 省略號），**不是完整 JWT**。所以 skill runtime 實際依賴 `~/.config/retrocast/finmind-token`（本地檔寫入完整 token）。**首次安裝時這個檔必須建立**。
 
-1. **Agent 提示使用者設定 FinMind token via OpenClaw secrets**：
-   ```
-   這個 skill 需要 FinMind API token。請用以下指令設定（token 不會留在 shell history）：
-   $ openclaw secrets store set FINMIND_TOKEN --kind env
-   # CLI 會要你貼 token（masked prompt）
-   ```
-2. **使用者執行指令並貼 token** → token 存進 OpenClaw secrets
-3. **驗證 token 讀取**：
-   ```bash
-   .venv/bin/python scripts/retrocast_cli.py health
-   # 預期: "finmind_token": true
-   ```
-4. **（可選）列出 profiles 確認 CSV 已就位**：
-   ```bash
-   .venv/bin/python scripts/retrocast_cli.py profiles
-   ```
-
-**情境 B — 已透過其他方式有 token（legacy 橋接）**：
-
-- 把 token 寫到 `~/.config/retrocast/finmind-token`（純 token 字串，chmod 600）：
-  ```bash
-  umask 077
-  echo "your_jwt_here" > ~/.config/retrocast/finmind-token
-  chmod 600 ~/.config/retrocast/finmind-token
-  ```
-- 或 export `FINMIND_TOKEN` env var
-
-**情境 C — 全新機器 / 重裝**：
+**Step 1 — Agent 引導使用者跑 `setup_token.py`**（一步到位）：
 
 ```bash
-# 1. 將整個 skill 目錄複製到目標位置（保留 .venv/ 或不保留均可）
+.venv/bin/python scripts/setup_token.py
+```
+
+script 內部流程：
+1. 試從 `openclaw secrets store get FINMIND_TOKEN` 讀完整 token（長度 ≥ 50 且不含 `…` 才視為完整）
+   - 讀到 → 直接寫入 `~/.config/retrocast/finmind-token` (chmod 600, umask 077)
+   - 沒讀到（preview-only 或沒設定）→ 提示使用者手動貼 token（用 `getpass` 隱藏輸入，不進 shell history）
+2. 寫到 `~/.config/retrocast/finmind-token`（含 `FINMIND_TOKEN=***` 格式，`chmod 600`，目錄 `~/.config/retrocast/` 不存在會自動建立）
+3. 跑 `retrocast_cli.py health` 驗證 `finmind_token: true`
+
+**Step 2 — 若使用者已透過其他方式有 token（legacy / 不想用 OpenClaw secrets）**：
+
+直接寫到本地檔：
+```bash
+mkdir -p ~/.config/retrocast
+umask 077
+echo "your_jwt_here" > ~/.config/retrocast/finmind-token
+chmod 600 ~/.config/retrocast/finmind-token
+```
+
+或 export `FINMIND_TOKEN` env var（CI / testing 友善，但**只用於測試**，正式使用仍建議本地檔）。
+
+**Step 3 — 全新機器 / 重裝**：
+
+```bash
+# 1. clone skill (從 kalapontsai/RetroCast branch agent-skill)
+git clone -b agent-skill https://github.com/kalapontsai/RetroCast.git ~/RetroCast-skill
+cd ~/RetroCast-skill
+
 # 2. 建立 venv + 裝套件
-cd ~/.openclaw/agents/main/agent/workshop-skills/retrocast
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-# 3. 設定 FinMind token（見情境 A）
+
+# 3. 跑 setup_token (這一步不可省略!)
+.venv/bin/python scripts/setup_token.py
+
+# 4. 驗證
+.venv/bin/python scripts/retrocast_cli.py health
 ```
+
+**為什麼必須跑 setup_token**：skill runtime 對 token 來源的優先序是
+1. `~/.config/retrocast/finmind-token`（首選，本地檔含完整 JWT）
+2. OpenClaw secrets `FINMIND_TOKEN`（audit/rotation source，但 env-kind 只能 preview）
+3. env var `FINMIND_TOKEN`（CI / testing 友善）
 
 **首次跑 analyze 的快取**：skill-internal `data/price_cache/` 已封裝 29 個 FinMind JSON（11 MB），首次跑 analyze 不用重新抓台股歷史價。
 

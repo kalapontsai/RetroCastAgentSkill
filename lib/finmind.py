@@ -96,23 +96,24 @@ def _load_finmind_token_from_openclaw() -> str:
 
 def load_finmind_token() -> str:
     """
-    三段式讀取（v1.2）：
-      1) OpenClaw secrets FINMIND_TOKEN  ← 首選（audit + runtime 一致）
-      2) ~/.config/retrocast/finmind-token  ← legacy 本地橋接
+    三段式讀取（v1.3.3 優先序調換）：
+      1) ~/.config/retrocast/finmind-token  ← 首選（本地檔，永久包含完整 JWT）
+      2) OpenClaw secrets FINMIND_TOKEN  ← audit 用，但 env-kind 只能 preview (含 '…')
       3) env var FINMIND_TOKEN  ← CI / testing 友善
-    結果以 module-level _TOKEN_CACHE 快取,同一 process 重複 import 不再叫 subprocess。
+
+    v1.3.3 變更理由：OpenClaw secrets store get 在 env-kind 模式下
+    只回 redacted preview（例 'eyJ0eX…RlnQ', 11 chars + Unicode 省略號），不是完整 JWT
+    (169 bytes)。即使載進來送到 FinMind API 也是 'Token is illegal'。
+    所以實際能用的只有本地橋接檔（~/.config/retrocast/finmind-token）與 env var。
+    OpenClaw secrets 保留為 audit 與 rotation source,但 runtime 不依賴。
+
+    結果以 module-level _TOKEN_CACHE 快取，同一 process 重複 import 不再叫 subprocess。
     """
     global _TOKEN_CACHE
     if _TOKEN_CACHE is not None:
         return _TOKEN_CACHE
 
-    # 1) OpenClaw secrets
-    tok = _load_finmind_token_from_openclaw()
-    if tok:
-        _TOKEN_CACHE = tok
-        return tok
-
-    # 2) ~/.config/retrocast/finmind-token（legacy）
+    # 1) ~/.config/retrocast/finmind-token (首選，本地檔含完整 JWT)
     legacy = Path.home() / '.config' / 'retrocast' / 'finmind-token'
     cfg = _parse_key_value_file(legacy)
     tok = cfg.get('FINMIND_TOKEN', '').strip()
@@ -120,7 +121,13 @@ def load_finmind_token() -> str:
         _TOKEN_CACHE = tok
         return tok
 
-    # 3) env var
+    # 2) OpenClaw secrets (audit/rotation source,但 env-kind 只回 preview → 實際上不會用上)
+    tok = _load_finmind_token_from_openclaw()
+    if tok:
+        _TOKEN_CACHE = tok
+        return tok
+
+    # 3) env var (CI / testing 友善)
     tok = os.environ.get('FINMIND_TOKEN', '').strip()
     if tok:
         _TOKEN_CACHE = tok

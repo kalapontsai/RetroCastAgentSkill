@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+
+# Runtime artifacts (regenerated on demand)
+data/price_cache/
+data/reports/
+
+# User-private data
+user_profile/*.csv
+!user_profile/sample_stock.csv
+!user_profile/.gitignore
+!user_profile/*.example.csv
+
+# Secrets / tokens
+config/
+*.token
+finmind-api-key
+
+# OS
+Thumbs.db
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Build / dist
+build/
+dist/
+*.egg-info/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Cache
+.mypy_cache/
+.ruff_cache/
+__pycache__/

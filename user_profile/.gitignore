@@ -1,0 +1,4 @@
+# 個股名單屬個人隱私，不進版本
+*.csv
+!sample_stock.csv
+!*.example.csv

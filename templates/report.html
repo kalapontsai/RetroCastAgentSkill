@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>投資組合歷史回測 + 未來 N 年情境報告 — {{ profile_name or 'untitled' }}</title>
+<style>
+  body { font-family: Arial, "Microsoft JhengHei", "PingFang TC", sans-serif;
+         background: #f5f7fa; color: #202b3c; margin: 0; padding: 0; }
+  .wrap { max-width: 1180px; margin: 24px auto; padding: 0 18px; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 12px;
+          padding: 20px; margin: 16px 0; }
+  h1 { color: #17365d; margin: 0 0 6px; font-size: 22px; }
+  h2 { color: #17365d; border-bottom: 1px solid #e3e8ef; padding-bottom: 8px;
+       margin-top: 24px; font-size: 17px; }
+  h3 { color: #17365d; margin-top: 18px; font-size: 14px; }
+  .meta { color: #5a6a7e; font-size: 13px; margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 8px 10px; text-align: right; font-size: 13px; }
+  th, td:first-child { text-align: left; }
+  th { background: #eef3f8; font-weight: bold; color: #17365d; }
+  tr.highlight td { background: #fff7e6; font-weight: bold; }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+  .kpi > div { background: #f1f5f9; padding: 12px 14px; border-radius: 8px; }
+  .kpi .kpi-name { color: #5a6a7e; font-size: 11px; display: block; font-weight: normal; }
+  .kpi .kpi-value { display: block; font-size: 22px; margin-top: 4px; color: #17365d; font-weight: bold; }
+  .kpi .kpi-tip { display: block; margin-top: 4px; font-size: 10px; color: #7a8a9e; line-height: 1.35; }
+  .note { background: #fff7e6; border-left: 4px solid #d98b00;
+          padding: 12px 14px; font-size: 13px; color: #6b4f00; }
+  .card.warn { background: #fffaf0; border-color: #f0c674; }
+  .card.warn h2 { color: #8b4500; }
+  .card.warn ul { margin: 8px 0 0; padding-left: 22px; }
+  .card.warn li { margin: 6px 0; font-size: 13px; line-height: 1.6; color: #4a3000; }
+  .card.warn code { background: #f0e6d2; padding: 1px 5px; border-radius: 3px;
+                    font-family: Consolas, "Courier New", monospace; font-size: 12px; }
+  .footer { text-align: center; color: #95a5b8; font-size: 12px; margin: 24px 0; }
+  @media print { body { background: #fff; } .card { border: none; box-shadow: none; }
+                 .kpi { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>投資組合歷史回測 + 未來 N 年情境報告</h1>
+  <div class="meta">
+    用戶名單：<b>{{ profile_name or '（未指定）' }}</b>　·
+    推估年數 N：<b>{{ analyze.forecast.n }} 年</b>　·
+    目前資產：<b>{{ "{:,}".format(analyze.forecast.pv|int) }}</b>{% if analyze.inputs.pv_cost_text %}（{{ analyze.inputs.pv_cost_text }}）{% endif %}　·
+    生成時間：<b>{{ generated_at }}</b>
+    {% if analyze.retirement_inputs %}
+    <br>
+    目前年齡：<b>{{ analyze.retirement_inputs.current_age }} 歲</b>　·
+    退休年齡：<b>{{ analyze.retirement_inputs.retirement_age }} 歲</b>　·
+    退休評估終點：<b>{{ analyze.retirement_inputs.retirement_end_age }} 歲</b>　·
+    退休評估期：<b>{{ analyze.retirement_inputs.retirement_end_age - analyze.retirement_inputs.current_age }} 年</b>　·
+    未來推估終點年齡：<b>{{ analyze.retirement_inputs.current_age + analyze.inputs.n }} 歲</b>
+    {% endif %}
+  </div>
+
+  {# Phase 5 (F2): Pre-flight Model Validation 區塊 #}
+  {% if analyze.validation and analyze.validation.summary %}
+  <div class="card" style="border-left: 4px solid {% if analyze.validation.summary.critical_fail > 0 %}#b42318{% elif analyze.validation.summary.warn_fail > 0 %}#d29922{% else %}#1e8e3e{% endif %};">
+    <h2 style="margin-top:0;">預先驗證結果（Pre-flight Check）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      產報告前自動驗證 N-year consistency、退休 MC horizon、提款一致性、費用對齊、無未來洩漏等項目。
+      {% if analyze.validation.summary.critical_fail > 0 %}
+      <b style="color:#b42318;">有 {{ analyze.validation.summary.critical_fail }} 條 critical FAIL,請檢查下方對應區塊。</b>
+      {% elif analyze.validation.summary.warn_fail > 0 %}
+      <b style="color:#d29922;">有 {{ analyze.validation.summary.warn_fail }} 條 warn,請檢視。</b>
+      {% else %}
+      <b style="color:#1e8e3e;">沒有失敗項目。</b>
+      {% endif %}
+    </p>
+    <table>
+      <thead><tr><th>項目</th><th>嚴重度</th><th>狀態</th><th>說明</th></tr></thead>
+      <tbody>
+      {% for c in analyze.validation.checks if c.status != 'PASS' %}
+        <tr style="color:{% if c.status == 'FAIL' and c.severity == 'CRITICAL' %}#b42318{% elif c.status == 'FAIL' %}#d29922{% elif c.status == 'SKIP' %}#5a6a7e{% else %}#1e8e3e{% endif %};">
+          <td>{{ c.name }}</td>
+          <td>{{ c.severity }}</td>
+          <td>{% if c.status == 'PASS' %}[PASS]{% elif c.status == 'FAIL' %}[FAIL]{% else %}[SKIP]{% endif %}</td>
+          <td style="font-size:12px;">{{ c.message or ('expected=' + (c.expected|string) + ', actual=' + (c.actual|string)) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" style="color:#1e8e3e;">沒有 FAIL / SKIP 項目。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>〇、組合起始市值</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">用「最新收盤價 × 股數」自動算出今天的組合值。</p>
+    {% if analyze.market_value %}
+    <div class="kpi" style="grid-template-columns: repeat(3, 1fr);">
+      <div>
+        <span class="kpi-name">估值日</span>
+        <b class="kpi-value">{{ analyze.market_value.as_of }}</b>
+      </div>
+      <div>
+        <span class="kpi-name">組合市值</span>
+        <b class="kpi-value">{{ "{:,}".format(analyze.market_value.total) }}</b>
+        <span class="kpi-tip">最後收盤價 × 持有股數。</span>
+      </div>
+      <div>
+        <span class="kpi-name">市值來源</span>
+        <b class="kpi-value" style="font-size:14px">{{ analyze.inputs.pv_source or '—' }}</b>
+        <span class="kpi-tip">「market_value」= 自動用市值；「user_input」= 手動指定。</span>
+      </div>
+    </div>
+    <table style="margin-top:14px">
+      <thead><tr><th>股票</th><th>股數</th><th>收盤價</th><th>市值</th><th>權重</th></tr></thead>
+      <tbody>
+      {% for s in analyze.market_value.per_stock|sort(attribute='value', reverse=true) %}
+        <tr>
+          <td>{{ s.ticker }}</td>
+          <td>{{ "{:,}".format(s.shares) }}</td>
+          <td>{{ "%.2f"|format(s.close) }}</td>
+          <td>{{ "{:,}".format(s.value) }}</td>
+          <td>{{ (s.value / analyze.market_value.total) | fmt_pct(decimals=1) }}%</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>〇.五、代號驗證結果（從 FinMind TaiwanStockInfo 比對）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">自動把你寫的代號補 0 並對到正確的 stock_id。</p>
+    {% if analyze.inputs.ticker_match %}
+    <table>
+      <thead><tr>
+        <th>stock_id</th><th>名稱</th><th>市場</th><th>使用者原始</th><th>備註</th>
+      </tr></thead>
+      <tbody>
+        {% for m in (analyze.inputs.ticker_match.values()|list|sort(attribute='stock_id')) %}
+        {% set short_set = analyze.inputs.short_history or [] %}
+        <tr {% if m.stock_id in short_set %}style="color:#b42318"{% endif %}>
+          <td>{{ m.stock_id }}{% if m.source != 'exact' %} <small>(原 {{ m.matched_from[0] }})</small>{% endif %}</td>
+          <td>{{ m.stock_name or '—' }}</td>
+          <td>{{ m.type or '—' }}</td>
+          <td>{{ m.matched_from | join(', ') }}</td>
+          <td>{% if m.stock_id in short_set %}⚠️ 歷史 &lt; {{ analyze.forecast.n }} 年（不適合長期推估）{% else %}✓ 歷史足夠{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if analyze.inputs.invalid_tickers %}
+    <div style="background:#fff5f5; border-left:4px solid #b42318; padding:10px; margin-top:8px; font-size:13px;">
+      <b>⚠️ 以下代號在 FinMind TaiwanStockInfo 查無資料（已略過）：</b><br>
+      {% for x in analyze.inputs.invalid_tickers %}{{ x.user_input }}：{{ x.reason }}<br>{% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>一、各標的歷史長度（最少 / 中位數 / 最多 觀測年數）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">看每檔股票各自有多少年歷史資料 — 太短的會拉低 N 年推估的可信度。</p>
+    {% set short_set = analyze.inputs.short_history or [] %}
+    {% if analyze.history.per_stock %}
+    <table>
+      <thead><tr>
+        <th>股票</th><th>有資料第一天</th><th>最後一天</th>
+        <th>資料點數</th><th>歷史年數</th><th>首日收盤（含息還原除權息後）</th>
+      </tr></thead>
+      <tbody>
+      {% for t, info in (analyze.history.per_stock|dictsort) %}
+        <tr {% if t in short_set %}style="color:#b42318"{% endif %}>
+          <td>{{ t }}{% if t in short_set %} ⚠️{% endif %}</td>
+          <td>{{ info.start or '—' }}</td>
+          <td>{{ info.end or '—' }}</td>
+          <td>{{ info.rows }}</td>
+          <td>{{ "%.2f"|format(info.years) }}</td>
+          <td>{{ "%.2f"|format(info.first_close) if info.first_close is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>一.五、各標的歷史真實績效（個股 8 欄診斷表）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">看每檔股票**自己的**完整歷史 — 不受「共同起點」或其他股票限制。每檔都是拿自己上市第一天起跳到最近收盤為止算出的價格指數報酬率。讓你能判斷：「個股本身能力」到底是強還是弱，不被「進場時機」或「其他股拖著」誤判。</p>
+    {% if analyze.history.per_stock %}
+    <table>
+      <thead><tr>
+        <th>股票</th>
+        <th>起始日</th>
+        <th>終止日</th>
+        <th>回測年數</th>
+        <th>累積總報酬率</th>
+        <th>年化報酬率</th>
+        <th>歷史最大跌幅 (MDD)</th>
+        <th>年化波動率</th>
+        <th>性價比 (Sharpe)</th>
+      </tr></thead>
+      <tbody>
+      {% for t, info in (analyze.history.per_stock|dictsort) %}
+        <tr>
+          <td><b>{{ t }}</b></td>
+          <td>{{ info.start or '—' }}</td>
+          <td>{{ info.end or '—' }}</td>
+          <td>{{ "%.2f"|format(info.years) }}</td>
+          <td style="color:{% if info.get('total_return') and info.get('total_return') >= 0 %}#1e8e3e{% elif info.get('total_return') %}#b42318{% endif %}">{{ info.get('total_return') | fmt_pct(decimals=2) if info.get('total_return') is not none else '—' }}%</td>
+          <td style="color:{% if info.get('cagr') and info.get('cagr') >= 0 %}#1e8e3e{% elif info.get('cagr') %}#b42318{% endif %}">{{ info.get('cagr') | fmt_pct(decimals=2) if info.get('cagr') is not none else '—' }}%</td>
+          <td style="color:{% if info.get('mdd') and info.get('mdd') < -0.5 %}#b42318{% elif info.get('mdd') and info.get('mdd') < -0.2 %}#d29922{% endif %}">{{ info.get('mdd') | fmt_pct(decimals=2) if info.get('mdd') is not none else '—' }}%</td>
+          <td>{{ info.get('volatility') | fmt_pct(decimals=2) if info.get('volatility') is not none else '—' }}%</td>
+          <td style="color:{% if info.get('sharpe') and info.get('sharpe') >= 1 %}#1e8e3e{% elif info.get('sharpe') and info.get('sharpe') < 0 %}#b42318{% endif %}">{{ "%.2f"|format(info.get('sharpe')) if info.get('sharpe') is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p style="color:#5a6a7e; font-size:12px; margin-top:8px;">
+      註：「性價比」= (年化報酬 − 風險利率 0%) / 年化波動率，沒有設 risk-free rate。顏色門檻：MDD &lt; -50% 紅、-20%~-50% 橙；Sharpe &gt;= 1 線、&lt; 0 紅。
+    </p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>一.六、各標的 N 年區間對齊績效（時間對齊比較）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">上面那表各股使用「各自上市第一天」起算 — 不同起點不能公平比。本表用「同一個N年窗口」（以全體中最末日為邊界，往前推N年）讓所有股票**使用同一個期間**，適合判斷「同樣上過幾年拼最近表現」。如果某股上市未達 N 年，會誠實標示不足，years 會反映實際觀察長度。</p>
+    {% if analyze.history.per_stock_n_year %}
+      {% set n_year_set = [] %}
+      {% for t, info in analyze.history.per_stock_n_year.items() %}
+        {% if info.n_years and info.n_years not in n_year_set %}{% set _ = n_year_set.append(info.n_years) %}{% endif %}
+      {% endfor %}
+      {% set n_years = n_year_set[0] if n_year_set else 10 %}
+      <table>
+        <thead><tr>
+          <th>股票</th>
+          <th>窗口開始</th>
+          <th>窗口結束</th>
+          <th>實際年數</th>
+          <th>累積總報酬率 ({{ n_years }}y)</th>
+          <th>年化報酬率</th>
+          <th>歷史最大跌幅 (MDD)</th>
+          <th>年化波動率</th>
+          <th>性價比 (Sharpe)</th>
+        </tr></thead>
+        <tbody>
+        {% for t, info in (analyze.history.per_stock_n_year|dictsort) %}
+          <tr>
+            <td><b>{{ t }}</b>{% if info.short %} <small style="color:#d29922;">⚠ 上市未滿 N 年</small>{% endif %}</td>
+            <td>{{ info.start or '—' }}</td>
+            <td>{{ info.end or '—' }}</td>
+            <td>{{ "%.2f"|format(info.years) }} {% if info.short %}<small style="color:#5a6a7e;">/ {{ info.n_years }}y</small>{% endif %}</td>
+            <td style="color:{% if info.get('total_return') and info.get('total_return') >= 0 %}#1e8e3e{% elif info.get('total_return') %}#b42318{% endif %}">{{ info.get('total_return') | fmt_pct(decimals=2) if info.get('total_return') is not none else '—' }}%</td>
+            <td style="color:{% if info.get('cagr') and info.get('cagr') >= 0 %}#1e8e3e{% elif info.get('cagr') %}#b42318{% endif %}">{{ info.get('cagr') | fmt_pct(decimals=2) if info.get('cagr') is not none else '—' }}%</td>
+            <td style="color:{% if info.get('mdd') and info.get('mdd') < -0.5 %}#b42318{% elif info.get('mdd') and info.get('mdd') < -0.2 %}#d29922{% endif %}">{{ info.get('mdd') | fmt_pct(decimals=2) if info.get('mdd') is not none else '—' }}%</td>
+            <td>{{ info.get('volatility') | fmt_pct(decimals=2) if info.get('volatility') is not none else '—' }}%</td>
+            <td style="color:{% if info.get('sharpe') and info.get('sharpe') >= 1 %}#1e8e3e{% elif info.get('sharpe') and info.get('sharpe') < 0 %}#b42318{% endif %}">{{ "%.2f"|format(info.get('sharpe')) if info.get('sharpe') is not none else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p style="color:#5a6a7e; font-size:12px; margin-top:8px;">
+        註：N 年期間是以「所有股票最後一個交易日」為邊界、往前推 N 年。例如 N=10 則窗口為 {{ "(today - 10y)" }} 至 today。
+        ⚠ 表示該股上市未滿 N 年，years 反映實際可觀察長度。
+        跟上一表最大差別：0050 在 23 年表報 23 年含息 CAGR 13.07%，在 N=10 表只看最近 10 年 → 可能不同。
+      </p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>二、歷史真實績效：3 種回測模式比較</h2>
+    {% if analyze.effective_weights %}
+    <p class="weights-info" style="color:#17365d; font-size:13px; font-weight:500; background:#f0f4f8; padding:6px 10px; border-left:3px solid #17365d; border-radius:3px; margin:6px 0;">
+      <b>此次權重：</b>{{ analyze | weights_display }}
+    </p>
+    {% endif %}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">不同回測條件會得到不同答案 — 並列顯示才能看到答案的「完整範圍」。</p>
+    {% set mode_meta = [
+      ('common', '全體共同期間（最嚴格比較）',
+       '從「最晚掛牌的那檔股票」上市日開始算起，所有標的從同一起跑點公平競爭。'),
+      ('dynamic', '逐步加入模式（最貼近真實投資）',
+       '哪檔股票上市了就自動納入組合，還原資金隨時間逐步配置的真實情況。'),
+      ('full', '各標的完整歷史（單獨診斷）',
+       '每檔股票各自從上市第一天算到現在，用來檢視個股本身的歷史能力。'),
+    ] %}
+    {# 判斷三模式是否共用同一組 start/end（都存在且相同 → hoist）#}
+    {% set cs = analyze.common.metrics.start if analyze.common else None %}
+    {% set ce = analyze.common.metrics.end if analyze.common else None %}
+    {% set ds = analyze.dynamic.metrics.start if analyze.dynamic else None %}
+    {% set de = analyze.dynamic.metrics.end if analyze.dynamic else None %}
+    {% set fs = analyze.full.metrics.start if analyze.full else None %}
+    {% set fe = analyze.full.metrics.end if analyze.full else None %}
+    {% set all_present = cs and ds and fs %}
+    {% set same_dates = all_present and (cs == ds == fs) and (ce == de == fe) %}
+    {% if same_dates %}
+    <div class="note" style="margin-top:6px;">
+      <b>三模式共用起訖日：</b>　開始日期 <b>{{ cs }}</b>　｜　結束日期 <b>{{ ce }}</b>
+      <span style="color:#7a5b00; font-size:12px;">（避免重複,提高至上一階顯示）</span>
+    </div>
+    {% endif %}
+    {% for mode_key, mode_label, mode_tip in mode_meta %}
+      {% if analyze[mode_key] %}
+      <h3 style="color:#17365d; margin-top:18px;">▶ {{ mode_label }}</h3>
+      <p style="color:#5a6a7e; font-size:12px; margin:0 0 8px;">{{ mode_tip }}</p>
+      {% set m = analyze[mode_key].metrics %}
+      <div class="kpi" {% if same_dates %}style="grid-template-columns: repeat(3, 1fr);"{% endif %}>
+        {% if not same_dates %}
+        <div>
+          <span class="kpi-name">開始日期</span>
+          <b class="kpi-value">{{ m.start }}</b>
+        </div>
+        <div>
+          <span class="kpi-name">結束日期</span>
+          <b class="kpi-value">{{ m.end }}</b>
+        </div>
+        {% endif %}
+        <div>
+          <span class="kpi-name">回測年數</span>
+          <b class="kpi-value">{{ "%.2f"|format(m.years) }}</b>
+          <span class="kpi-tip">歷史回測覆蓋的實際年數。</span>
+        </div>
+        <div>
+          <span class="kpi-name">累積總報酬率</span>
+          <b class="kpi-value">{{ m.total_return | fmt_pct }}%</b>
+          <span class="kpi-tip">整段期間的累積漲跌幅（未年化）。</span>
+        </div>
+        <div>
+          <span class="kpi-name">年化報酬率（年均複利）</span>
+          <b class="kpi-value">{{ m.cagr | fmt_pct }}%</b>
+          <span class="kpi-tip">把累積報酬攤提成「每年平均成長幾 %」。</span>
+        </div>
+        <div>
+          <span class="kpi-name">歷史最大跌幅（最大回檔）</span>
+          <b class="kpi-value">{{ m.mdd | fmt_pct }}%</b>
+          <span class="kpi-tip">從最高點跌到最低點的最慘虧損幅度。</span>
+        </div>
+        <div>
+          <span class="kpi-name">年化波動率（價格震盪幅度）</span>
+          <b class="kpi-value">{{ m.volatility | fmt_pct }}%</b>
+          <span class="kpi-tip">數值越高代表平常股價上沖下洗越劇烈。</span>
+        </div>
+        <div>
+          <span class="kpi-name">性價比（夏普值）</span>
+          <b class="kpi-value">{{ m.sharpe | fmt_float }}</b>
+          <span class="kpi-tip">評估承擔波動風險是否划算；&gt;1 代表承擔風險的回報很划算。</span>
+        </div>
+      </div>
+      {% set rm = analyze[mode_key].recent_metrics %}
+      {% if rm %}
+      <div style="margin-top:12px; padding:8px 10px; background:#f5f8fb; border-left:3px solid #4f81bd; border-radius:4px;">
+        <div style="color:#17365d; font-weight:600; font-size:13px; margin-bottom:4px;">
+          📌 最近 {{ analyze.inputs.n }} 年真實績效（重正規化起點）
+        </div>
+        <div class="kpi" style="grid-template-columns: repeat(4, 1fr); font-size:12px;">
+          <div>
+            <span class="kpi-name">區間</span>
+            <b class="kpi-value" style="font-size:12px;">{{ rm.start }} → {{ rm.end }}</b>
+          </div>
+          <div>
+            <span class="kpi-name">年化報酬率 (CAGR)</span>
+            <b class="kpi-value">{{ rm.cagr | fmt_pct }}%</b>
+          </div>
+          <div>
+            <span class="kpi-name">歷史最大回檔 (MDD)</span>
+            <b class="kpi-value">{{ rm.mdd | fmt_pct }}%</b>
+          </div>
+          <div>
+            <span class="kpi-name">年化波動率</span>
+            <b class="kpi-value">{{ rm.volatility | fmt_pct }}%</b>
+          </div>
+        </div>
+        <div style="color:#5a6a7e; font-size:11px; margin-top:4px;">
+          跟上方「完整歷史」分開計算: 上市早期 (例如 0050 剛上市 2003-2007 低波動低報酬期間) 會拉低完整歷史 CAGR。
+          「最近 {{ analyze.inputs.n }} 年」跳過那段起點，rebase 到 1.0 後重算，較能反映近期台股實際環境。
+        </div>
+      </div>
+      {% endif %}
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h2>三、未來 N 年情境推估（終值分布）</h2>
+    <div class="note">
+      取「歷史滾動 N 年收益分布」的分位數（基於 <b>{{ analyze.forecast.basis or '—' }}</b> 模式），
+      算出 5 個情境的終值。FV = 目前資產 × (1+r)^N。<b>不模擬未來逐年路徑</b>。
+    </div>
+    {% if analyze.forecast.scenarios %}
+    <table>
+      <thead><tr>
+        <th>情境</th><th>分位數</th><th>歷史 N 年年化報酬率</th>
+        <th>目前資產</th><th>N 年後終值</th><th>資產增長倍數</th>
+      </tr></thead>
+      <tbody>
+        {% set scen_tip = {
+          'Bear': '遇上極端弱勢市場時的預估結果。',
+          'Conservative': '市場表現偏弱時的預估結果。',
+          'Base': '最符合歷史一般平均表現的中間值。',
+          'Optimistic': '市場處於順風多頭時的預估結果。',
+          'Bull': '遇上超強大多頭行情的預估結果。',
+        } %}
+        {% for s in analyze.forecast.scenarios %}
+        <tr {% if s.label == 'Base' %}class="highlight"{% endif %}>
+          <td title="{{ scen_tip.get(s.label, '') }}">{{ s.label }}</td>
+          <td>P{{ s.quantile | safe_pct | int }}</td>
+          <td>{{ s.cagr | fmt_pct }}%</td>
+          <td>{{ "{:,}".format(analyze.forecast.pv|int) }}</td>
+          <td><b>{{ "{:,}".format(s.fv|int) }}</b></td>
+          <td>{{ s.multiplier | fmt_float(decimals=2) }}x</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="meta">歷史滾動 N 年樣本數：<b>{{ analyze.forecast.rolling_count }}</b></p>
+    {# Phase 6 (Item 3): 樣本有效性統計 #}
+    {% set ss = analyze.forecast.sample_stats or {} %}
+    {% if ss %}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      有效樣本數：<b>{{ ss.valid_count }}</b>　·
+      排除樣本數：<b>{{ ss.excluded_count }}</b>　·
+      最短實際持有年數：<b>{{ "%.2f"|format(ss.min_actual_years) if ss.min_actual_years is not none else '—' }} 年</b>　·
+      最長實際持有年數：<b>{{ "%.2f"|format(ss.max_actual_years) if ss.max_actual_years is not none else '—' }} 年</b>
+    </p>
+    {% endif %}
+    {% endif %}
+
+    {% if rolling_chart_svg %}
+    <h3 style="color:#17365d; margin-top:20px;">① 歷史滾動 N 年收益分布圖</h3>
+    {# Phase 6 (Item 4): X 軸定義 #}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      <b>X 軸 = 每一筆滾動 N 年樣本的「持有期間結束日」</b>　·
+      Y 軸 = 該 N 年的年化報酬 (CAGR)。<br>
+      每個點代表歷史上某 N 年窗口的年化報酬，<b>不是時間序列</b>；只看分布，不看趨勢。
+    </p>
+    {% set rolling_rows = analyze.forecast.rolling or [] %}
+    {% if rolling_rows %}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      有效 rolling 結束日：<b>{{ rolling_rows[0].end }} ～ {{ rolling_rows[-1].end }}</b>　·
+      共 <b>{{ rolling_rows|length }}</b> 筆完整 {{ analyze.forecast.n }} 年視窗；圖表不會繪製不足 N 年的日期。
+    </p>
+    {% endif %}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      這張圖讓你看 5 個情境的分位數（P10/P25/P50/P75/P90）落在哪裡 — 分布越分散，未來越不確定。
+    </p>
+    {{ rolling_chart_svg|safe }}
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>四、Benchmark 對照組</h2>
+    {% if not analyze.benchmark %}
+    <p class="hint">未指定 Benchmark（可在輸入區填寫對照組股票代號，例如 0050）</p>
+    {% else %}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">拿一檔基準股票跟你的組合比較，看是贏還是輸。</p>
+    {% if analyze.benchmark.error %}
+    <p style="color:#b42318;">Benchmark 抓取失敗：{{ analyze.benchmark.error }}</p>
+    {% elif analyze.benchmark.metrics %}
+    {% set bm = analyze.benchmark %}
+    {% set port_m = analyze.dynamic.metrics %}
+    <table>
+      <thead><tr><th>指標</th><th>Benchmark {{ bm.ticker }}</th><th>組合（逐步加入）</th></tr></thead>
+      <tbody>
+        <tr><td>年化報酬率（年均複利）</td>
+          <td>{{ bm.metrics.cagr | fmt_pct }}%</td>
+          <td>{{ port_m.cagr | fmt_pct }}%</td></tr>
+        <tr><td>歷史最大跌幅（最大回檔）</td>
+          <td>{{ bm.metrics.mdd | fmt_pct }}%</td>
+          <td>{{ port_m.mdd | fmt_pct }}%</td></tr>
+        <tr><td>年化波動率（價格震盪幅度）</td>
+          <td>{{ bm.metrics.volatility | fmt_pct }}%</td>
+          <td>{{ port_m.volatility | fmt_pct }}%</td></tr>
+        <tr><td>性價比（夏普值）</td>
+          <td>{{ bm.metrics.sharpe | fmt_float }}</td>
+          <td>{{ port_m.sharpe | fmt_float }}</td></tr>
+      </tbody>
+    </table>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  {% if analyze.monte_carlo or analyze.sequence_risk %}
+  <div class="card">
+    <h2>五、Monte Carlo 模擬<span style="font-size:12px; color:#5a6a7e; font-weight:normal; margin-left:8px;">【雙軌模型】F1 純投資累積 + F2 退休提款存活率</span></h2>
+    {# Phase 6 (Item 9): F1/F2 拆分說明 #}
+    <div style="display:flex; gap:8px; margin:0 0 12px; font-size:12px;">
+      <span style="background:#dbeafe; color:#1e40af; padding:3px 10px; border-radius:4px; font-weight:600;">
+        F1 — 純投資累積模型
+      </span>
+      <span style="background:#fef3c7; color:#92400e; padding:3px 10px; border-radius:4px; font-weight:600;">
+        F2 — 退休提款 Sequence Risk 模型
+      </span>
+    </div>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 12px;">
+      F1 以歷史日股價 block bootstrap 抽出 N 條未來軌跡（無提款）；F2 加入提款 + 年金 + 一次性支出，評估退休存活率。
+      <b>本節取代歷史滾動推估</b>（同樣的問題但給出資產路徑 + 破產年齡分布）。
+    </p>
+
+    {% if analyze.monte_carlo and analyze.monte_carlo.summary %}
+    {% set mc = analyze.monte_carlo %}
+    {% set mcs = mc.summary %}
+    <h3 style="color:#17365d; margin-top:18px;">▶ F1 Monte Carlo（n={{ mc.n_simulations }} × {{ mc.horizon_years }} 年 · 區塊 bootstrap）</h3>
+    <table>
+      <thead><tr><th>指標</th><th>數值（NT$）</th></tr></thead>
+      <tbody>
+        <tr><td>中位終值</td><td>{{ mcs.get('median_final') | fmt_money }}</td></tr>
+        <tr><td>平均終值</td><td>{{ mcs.get('mean_final') | fmt_money }}</td></tr>
+        {# Phase 6 (Item 5): F1 完整分位數 P5/P10/P25/P50/P75/P90/P95 #}
+        <tr><td>P5（極端下限）</td><td>{{ mcs.get('p5_final') | fmt_money }}</td></tr>
+        <tr><td>P10（養老規劃下限）</td><td>{{ mcs.get('p10_final') | fmt_money }}</td></tr>
+        <tr><td>P25（保守下限）</td><td>{{ mcs.get('p25_final') | fmt_money }}</td></tr>
+        <tr><td>P75（樂觀上限）</td><td>{{ mcs.get('p75_final') | fmt_money }}</td></tr>
+        <tr><td>P90（養老規劃上限）</td><td>{{ mcs.get('p90_final') | fmt_money }}</td></tr>
+        <tr><td>P95（極端上限）</td><td>{{ mcs.get('p95_final') | fmt_money }}</td></tr>
+        <tr><td>標準差（NT$）</td><td>{{ mcs.get('std_final') | fmt_money }}</td></tr>
+        <tr><td>資產 ≥ 初始機率</td><td>{{ "{:.2%}".format(mcs.get('prob_above_initial', 0)) }}</td></tr>
+        <tr><td>資產 ≤ 0 機率（破產）</td><td>{{ "{:.2%}".format(mcs.get('prob_zero_or_negative', 0)) }}</td></tr>
+        <tr><td>存活到 horizon 機率</td><td>{{ "{:.2%}".format(mcs.get('survival_to_horizon', 0)) }}</td></tr>
+      </tbody>
+    </table>
+    {% if fan_chart_svg %}
+    <div style="margin-top:12px; padding:8px 0;">
+      <div style="color:#17365d; font-weight:600; font-size:13px; margin-bottom:4px;">
+        📈 未來 {{ mc.horizon_years }} 年資產路径分布 (P5/P25/P50/P75/P95, log scale)
+      </div>
+      {{ fan_chart_svg|safe }}
+      <div style="color:#5a6a7e; font-size:11px; margin-top:4px;">
+        統計蒙地卡羅 {{ mc.n_simulations|default(0) }} 次未來路径。中位線 (深紅) 代表「中位數情境」;最外帶 (深紅背景) 代表 90% 區間。
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% set optimization = analyze.get('optimization') or {} %}
+    {% if analyze.sequence_risk and analyze.sequence_risk.survival_rate is defined %}
+    {% set sr = analyze.sequence_risk %}
+    <h3 style="color:#17365d; margin-top:24px;">▶ F2 Sequence Risk（退休提款存活率）</h3>
+    {# Phase 6 (Item 6): 提款時點定義 #}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      <b>提款時點：年初</b>　·
+      現金流順序：年初扣生活費 (annuity × 1+通膨<sup>年資</sup>) → 投資報酬 → 年金注入 → 一次性支出 → 期末資產。
+      <b>破產判定：任一年末資產 ≤ 0</b>。
+    </p>
+    {% set sr_cfg = sr.config or {} %}
+    <p><b>Current Age = {{ sr_cfg.get('current_age') }} · Retirement Age = {{ sr_cfg.get('retirement_age') }} · Evaluation End Age = {{ sr_cfg.get('retirement_end_age') }}</b><br>
+      Years to Retirement = {{ sr_cfg.get('retirement_age', 60) - sr_cfg.get('current_age', 55) }} ·
+      Retirement Evaluation Period = {{ sr_cfg.get('retirement_end_age', 110) - sr_cfg.get('retirement_age', 60) }} years ·
+      Total Projection Period = {{ sr_cfg.get('retirement_end_age', 110) - sr_cfg.get('current_age', 55) }} years</p>
+    <h4>Sequence Risk by Age</h4>
+    <table><thead><tr><th>Age</th><th>Years From Now</th><th>Years After Retirement</th><th>Survival Probability</th><th>Median Asset</th><th>P5 Asset</th><th>P95 Asset</th></tr></thead><tbody>
+    {% for age in [60, 65, 70, 80, 90, 100, 110] %}{% set row = sr.get('wealth_by_age', {}).get(age|string, {}) %}
+      <tr><td>{{ age }}</td><td>{{ age - sr_cfg.get('current_age', 55) }}</td><td>{{ age - sr_cfg.get('retirement_age', 60) }}</td><td>{{ sr.success_rate_by_age.get(age|string, 'N/A') if sr.success_rate_by_age.get(age|string) is not none else 'N/A' }}</td><td>{{ row.get('p50', 'N/A')|fmt_money }}</td><td>{{ row.get('p5', 'N/A')|fmt_money }}</td><td>{{ row.get('p95', 'N/A')|fmt_money }}</td></tr>
+    {% endfor %}</tbody></table>
+    {% if optimization.get('retirement_monte_carlo', {}).get('status') == 'SUCCESS' %}<h4>Current vs Optimized Sequence Risk by Age</h4><table><thead><tr><th>Age</th><th>Current Survival</th><th>Optimized Survival</th><th>Current Median Asset</th><th>Optimized Median Asset</th></tr></thead><tbody>{% for age in [60, 65, 70, 80, 90, 100, 110] %}{% set c_row = optimization.retirement_monte_carlo.current.wealth_by_age.get(age|string, {}) %}{% set o_row = optimization.retirement_monte_carlo.optimized.wealth_by_age.get(age|string, {}) %}<tr><td>{{ age }}</td><td>{{ c_row.get('survival_probability', 'N/A') }}</td><td>{{ o_row.get('survival_probability', 'N/A') }}</td><td>{{ c_row.get('p50', 'N/A')|fmt_money }}</td><td>{{ o_row.get('p50', 'N/A')|fmt_money }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    <table class="compact" style="margin-bottom:12px;">
+      <thead><tr><th colspan="2">F2 本次計算條件</th></tr></thead>
+      <tbody>
+        <tr><td>初始資產</td><td>{{ "{:,.0f}".format(sr_cfg.get('initial_balance', 0)) }} NT$</td></tr>
+        <tr><td>目前年齡 / 退休年齡 / 評估終點</td><td>{{ sr_cfg.get('current_age') }} / {{ sr_cfg.get('retirement_age') }} / {{ sr_cfg.get('retirement_end_age') }} 歲</td></tr>
+        <tr><td>模擬 Horizon / 模擬次數</td><td>{{ sr_cfg.get('horizon_years') }} 年 / {{ sr_cfg.get('n_simulations') }} 次</td></tr>
+        <tr><td>月提款 / 提款通膨率</td><td>{{ "{:,.0f}".format(sr_cfg.get('withdrawal_monthly', 0)) }} NT$ / {{ "{:.2%}".format(sr_cfg.get('withdrawal_inflation', 0)) }}</td></tr>
+        <tr><td>月年金 / 年金調整率 / 年金開始年齡</td><td>{{ "{:,.0f}".format(sr_cfg.get('pension_monthly', 0)) }} NT$ / {{ "{:.2%}".format(sr_cfg.get('pension_inflation', 0)) }} / {{ sr_cfg.get('pension_start_age') }}</td></tr>
+        <tr><td>一次性支出</td><td>{% if sr_cfg.get('special_expenses') %}{% for exp in sr_cfg.get('special_expenses') %}第 {{ exp.get('year_offset', 0) }} 年：{{ "{:,.0f}".format(exp.get('amount', 0)) }} NT${% if not loop.last %}；{% endif %}{% endfor %}{% else %}無{% endif %}</td></tr>
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>指標</th><th>數值</th></tr></thead>
+      <tbody>
+        <tr><td>存活率（資產 > 0 機率）</td>
+          <td><b style="color:{% if sr.survival_rate >= 0.7 %}#1e8e3e{% elif sr.survival_rate >= 0.5 %}#b45309{% else %}#b42318{% endif %};">{{ "{:.2%}".format(sr.survival_rate) }}</b></td></tr>
+        <tr><td>破產率（任一年末資產 ≤ 0）</td>
+          <td><b style="color:{% if sr.ruin_rate|default(0) <= 0.3 %}#1e8e3e{% elif sr.ruin_rate|default(0) <= 0.5 %}#b45309{% else %}#b42318{% endif %};">{{ "{:.2%}".format(sr.ruin_rate|default(0)) }}</b></td></tr>
+        {# Phase 6 (Item 7): 最早破產年齡 #}
+        <tr><td>最早破產年齡</td>
+          <td>{% if sr.earliest_ruin_age is not none and sr.earliest_ruin_age is defined %}<b style="color:#b42318;">{{ sr.earliest_ruin_age }} 歲</b>{% else %}{% set sr_cfg = sr.config or {} %}未破產（本次 {{ sr_cfg.n_simulations|default(1000) }} 次模擬全部存活到 {{ sr_cfg.retirement_end_age|default(sr_cfg.current_age|default(55) + sr_cfg.horizon_years|default(30)) }} 歲）{% endif %}</td></tr>
+        <tr><td>中位終值餘額（NT$）</td><td>{{ sr.median_final_balance | fmt_money }}</td></tr>
+        {% if sr.success_rate_by_age %}
+        {# Phase 2A: 動態年齡列取代 hardcoded 70-90 #}
+        {# 以 retirement_age 為起點,依 horizon/5 遞增取樣 #}
+        {% set sr_cfg = sr.config or {} %}
+        {% set r_age = sr_cfg.get('retirement_age', 60) %}
+        {% set horizon = sr_cfg.get('horizon_years', 30) %}
+        {% set ages = [] %}
+        {% for k in range(1, (horizon // 5) + 1) %}
+          {% set _ = ages.append(r_age + 5 * k) %}
+        {% endfor %}
+        {% for age in ages %}
+          {% set key = age|string %}
+          {% set rate = sr.success_rate_by_age.get(key) if sr.success_rate_by_age.get(key) is not none else sr.success_rate_by_age.get(age) %}
+          {# Phase 5 (F1): None 不強轉 0.0,應顯示 N/A(checklist §四) #}
+          {% if rate is none %}
+        <tr><td>{{ age }} 歲存活率</td><td style="color:#5a6a7e;">N/A (超出 Simulation Horizon)</td></tr>
+          {% else %}
+        <tr><td>{{ age }} 歲存活率</td><td>{{ "{:.2%}".format(rate) }}</td></tr>
+          {% endif %}
+        {% endfor %}
+        {% endif %}
+        {% set ruin_dist = sr.get('ruin_age_distribution') %}
+        {# Phase 2B: 永遠渲染 ruin 區塊(有 list 就顯示 histogram,空 list 顯示零破產訊息) #}
+        {% if ruin_dist is not none %}
+        <tr><td colspan="2" style="padding-top:8px; color:#17365d; font-weight:600;">破產年齡分布</td></tr>
+          {% set ruin_total = ruin_dist|length %}
+          {% if ruin_total > 0 %}
+            {% set ruin_counts = {} %}
+            {% for ra in ruin_dist %}
+              {% set _ = ruin_counts.update({ra: ruin_counts.get(ra, 0) + 1}) %}
+            {% endfor %}
+            {% set ruin_sorted = ruin_counts|dictsort %}
+            {% for age, cnt in ruin_sorted %}
+              {% set pct = cnt / ruin_total %}
+        <tr><td>&nbsp;&nbsp;{{ age }} 歲破產</td>
+          <td>
+            <span style="display:inline-block; min-width:80px;">
+              {{ "{:.2%}".format(pct) }}  ({{ cnt }} 次)
+            </span>
+            <span style="display:inline-block; background:#b42318; height:8px; vertical-align:middle; margin-left:6px; width:{{ (pct*200)|round(1) }}px; max-width:200px;"></span>
+          </td>
+        </tr>
+            {% endfor %}
+          {% else %}
+        <tr><td colspan="2" style="color:#1e8e3e;">✅ 本次 {{ (sr.config or {}).get('n_simulations', 1000) }} 次模擬中，沒有任何路徑提早破產。</td></tr>
+          {% endif %}
+        {% endif %}
+      </tbody>
+    </table>
+    {% if ruin_age_chart_svg %}
+    <h4 style="color:#17365d; margin:16px 0 6px;">📊 破產年齡直條分布圖</h4>
+    <p class="hint">每根直條代表該破產年齡的模擬路徑數。</p>
+    {{ ruin_age_chart_svg|safe }}
+    {% endif %}
+    {% if survival_curve_svg %}
+    <div style="margin-top:12px; padding:8px 0;">
+      <div style="color:#17365d; font-weight:600; font-size:13px; margin-bottom:4px;">
+        📈 退休資產存活率 vs 年齡
+      </div>
+      {{ survival_curve_svg|safe }}
+      <div style="color:#5a6a7e; font-size:11px; margin-top:4px;">
+        點代表各年齡的存活率（資產 &gt; 0 機率）。點色：綠 ≥ 70%、橙 50–70%、紅 &lt; 50%。
+        虛線為 50% / 70% / 90% 參考線。
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# Phase 6 (Item 11): MDD 詳細 — Peak / Trough / Recovery Date (獨立 card,不在 risk_metrics if 內) #}
+{# v5 fix 2026-08-31 14:25: 改用 full mode 取代 common mode。
+   common mode 對「包含近期才上市股票」的 profile (如 elhomeo_stock 含 2026 年上市股)
+   只有 0.5 年區間，MDD 不具參考性。full mode 用全期 (例 26.57 年) 才有意義。
+   (二寶) #}
+{% set full_m = (analyze.full or {}).metrics or {} %}
+{% if not full_m.get('mdd_peak_date') %}{% set full_m = (analyze.common or {}).metrics or {} %}{% endif %}
+{% if full_m.get('mdd_peak_date') %}
+<div class="card">
+  <h2>六、風險指標</h2>
+  <h3 style="color:#17365d; margin-top:18px;">▶ MDD 詳細（Peak / Trough / Recovery）— 使用「各標的完整歷史」模式</h3>
+  <p style="color:#5a6a7e; font-size:12px; margin:0 0 8px;">這份詳細表採用 <b>各標的完整歷史（full mode）</b>的 MDD，區間 <b>{{ full_m.start }} → {{ full_m.end }}</b>（{{ "%.2f"|format(full_m.years) }} 年），最能反映「個股本身能承受的最大跌幅與回復能力」。上方三模式 KPI 卡另列 <code>common</code>（共同期間）與 <code>dynamic</code>（逐步加入）的 MDD 供對照。</p>
+  <table>
+    <thead><tr><th>指標</th><th>數值</th></tr></thead>
+    <tbody>
+      <tr><td>歷史最大回撤 (MDD)</td><td><b style="color:#b42318;">{{ full_m.mdd | fmt_pct }}%</b></td></tr>
+      <tr><td>Peak Date（高點）</td><td>{{ full_m.mdd_peak_date or '—' }}</td></tr>
+      <tr><td>Trough Date（低點）</td><td>{{ full_m.mdd_trough_date or '—' }}</td></tr>
+      <tr><td>Recovery Date（回復點）</td><td>{{ full_m.mdd_recovery_date or '<span style="color:#b42318;">未回復（仍在回撤中）</span>' | safe }}</td></tr>
+      <tr><td>回撤天數（Peak → Trough）</td><td>{{ "{:,}".format(full_m.mdd_drawdown_days|int) if full_m.mdd_drawdown_days is not none else '—' }} 天</td></tr>
+      <tr><td>回復天數（Trough → Recovery）</td><td>{{ "{:,}".format(full_m.mdd_recovery_days|int) if full_m.mdd_recovery_days is not none else '— (未回復)' }}</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if analyze.risk_metrics %}
+  <div class="card">
+    <h2>七、風險指標（VaR / Sharpe）</h2>
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 12px;">
+      F3 用歷史法算 VaR/CVaR（多 horizon × 多 confidence），F6 算 Sharpe（含無風險利率 1.5%）。
+    </p>
+    {% set rm = analyze.risk_metrics %}
+    {% if rm.var_cvar %}
+    <h3 style="color:#17365d; margin-top:18px;">▶ F3 VaR / CVaR（歷史法 · 日/月/年 3 個 horizon × 95/99% confidence）</h3>
+    <table>
+      <thead><tr><th>指標</th><th>1 日</th><th>21 日（月）</th><th>252 日（年）</th></tr></thead>
+      <tbody>
+        <tr><td>95% VaR</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_1d_95) if rm.var_cvar.var_1d_95 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_21d_95) if rm.var_cvar.var_21d_95 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_252d_95) if rm.var_cvar.var_252d_95 is not none else 'N/A' }}</td>
+        </tr>
+        <tr><td>99% VaR</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_1d_99) if rm.var_cvar.var_1d_99 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_21d_99) if rm.var_cvar.var_21d_99 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.var_252d_99) if rm.var_cvar.var_252d_99 is not none else 'N/A' }}</td>
+        </tr>
+        <tr><td>95% CVaR（條件損失）</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_1d_95) if rm.var_cvar.cvar_1d_95 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_21d_95) if rm.var_cvar.cvar_21d_95 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_252d_95) if rm.var_cvar.cvar_252d_95 is not none else 'N/A' }}</td>
+        </tr>
+        <tr><td>99% CVaR</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_1d_99) if rm.var_cvar.cvar_1d_99 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_21d_99) if rm.var_cvar.cvar_21d_99 is not none else 'N/A' }}</td>
+          <td>{{ "{:.2%}".format(rm.var_cvar.cvar_252d_99) if rm.var_cvar.cvar_252d_99 is not none else 'N/A' }}</td>
+        </tr>
+      </tbody>
+    </table>
+    {% endif %}
+    {% if rm.sharpe %}
+    <h3 style="color:#17365d; margin-top:24px;">▶ F6 Sharpe（含無風險利率 = {{ "{:.1%}".format(rm.sharpe.rf_used) }}）</h3>
+    <table>
+      <thead><tr><th>指標</th><th>數值</th></tr></thead>
+      <tbody>
+        <tr><td>Sharpe with Rf（使用 {{ "{:.1%}".format(rm.sharpe.rf_used) }} 無風險利率）</td>
+          <td><b>{{ rm.sharpe.sharpe_with_rf | fmt_float }}</b></td></tr>
+        <tr><td>Sharpe rf=0（對照組）</td><td>{{ rm.sharpe.sharpe_rf_0 | fmt_float }}</td></tr>
+        <tr><td>無風險利率來源</td><td>{{ rm.sharpe.rf_used }}（預設台灣 10Y 公債，可覆寫）</td></tr>
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% set opt = analyze.optimization or {} %}
+  <div class="card" id="optimization">
+    <h2>Return + Risk + MDD 再平衡最佳化</h2>
+    <div class="note">
+      <b>Optimization Status: {{ opt.status or 'N/A' }}</b>　·　本節只使用既有含息還原價格與持倉資料；不足時不產生假 Target Weight。
+    </div>
+    {% if opt.dataset %}
+    <h3>Daily Return Dataset / Data Quality</h3>
+    <table><tbody>
+      <tr><td>Requested N / Actual Common Period</td><td>{{ opt.dataset.requested_n_years or 'N/A' }} 年 / {{ opt.dataset.actual_common_period_years or 0 }} 年</td></tr>
+      <tr><td>共同資料期間</td><td>{{ opt.dataset.start_date or 'N/A' }} → {{ opt.dataset.end_date or 'N/A' }}</td></tr>
+      <tr><td>Observation Count</td><td>{{ opt.dataset.observation_count }}</td></tr>
+      <tr><td>Missing Count</td><td>{{ opt.dataset.missing_count }}</td></tr>
+      <tr><td>Valid Observation Ratio</td><td>{{ opt.dataset.valid_observation_ratio|fmt_pct }}%</td></tr>
+      {% for warning in opt.data_quality_warnings or [] %}<tr><td>Data Quality Warning</td><td style="color:#b42318">{{ warning }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+    {% if opt.correlation_matrix %}
+    <h3>Correlation Matrix</h3><table><thead><tr><th></th>{% for t in opt.correlation_matrix['tickers'] %}<th>{{ t }}</th>{% endfor %}</tr></thead><tbody>{% for row in opt.correlation_matrix['values'] %}<tr><td>{{ opt.correlation_matrix['tickers'][loop.index0] }}</td>{% for v in row %}<td>{{ v|fmt_float(decimals=3) }}</td>{% endfor %}</tr>{% endfor %}</tbody></table>
+    <h3>Annualized Covariance Matrix</h3><table><thead><tr><th></th>{% for t in opt.covariance_matrix['tickers'] %}<th>{{ t }}</th>{% endfor %}</tr></thead><tbody>{% for row in opt.covariance_matrix['values'] %}<tr><td>{{ opt.covariance_matrix['tickers'][loop.index0] }}</td>{% for v in row %}<td>{{ v|fmt_float(decimals=5) }}</td>{% endfor %}</tr>{% endfor %}</tbody></table>
+    {% if opt.dataset.pairwise_observation_count_matrix %}<h3>Pairwise Observation Count / Reliability</h3><table><thead><tr><th></th>{% for t in opt.dataset.pairwise_observation_count_matrix['tickers'] %}<th>{{ t }}</th>{% endfor %}</tr></thead><tbody>{% for row in opt.dataset.pairwise_observation_count_matrix['values'] %}<tr><td>{{ opt.dataset.pairwise_observation_count_matrix['tickers'][loop.index0] }}</td>{% for v in row %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody></table>{% endif %}
+    {% endif %}
+    {% if opt.current and opt.optimized %}
+    {% set om = opt.optimized %}{% set cm = opt.current %}
+    <h3>Current vs Optimized Portfolio Backtest</h3>
+    <table><thead><tr><th>Metric</th><th>Current</th><th>Optimized</th><th>Change / Direction</th></tr></thead><tbody>
+      {% for key, label, better in [('cagr','CAGR','Higher is better'),('volatility','Volatility','Lower is better'),('mdd','MDD','Higher is better'),('sharpe','Sharpe','Higher is better'),('sortino','Sortino','Higher is better'),('calmar','Calmar','Higher is better'),('var','VaR 5%','Higher is better'),('cvar','CVaR 5%','Higher is better')] %}
+      <tr><td>{{ label }}</td>{% if key in ('sharpe','sortino','calmar') %}<td>{{ cm[key]|fmt_float }}</td><td>{{ om[key]|fmt_float }}</td><td>{{ (om[key]-cm[key])|fmt_float }} · {{ better }}</td>{% else %}<td>{{ cm[key]|fmt_pct }}%</td><td>{{ om[key]|fmt_pct }}%</td><td>{{ (om[key]-cm[key])|fmt_pct }}% · {{ better }}</td>{% endif %}</tr>
+      {% endfor %}
+    </tbody></table>
+    {% endif %}
+    {% if opt.scores %}
+    <h3>Evidence Component Breakdown / Raw Score / Adjusted Score</h3>
+    <table><thead><tr><th>Asset</th><th>History Years</th><th>History Score</th><th>Regime Coverage</th><th>Drawdown Evidence</th><th>Observation Score</th><th>Evidence Score</th><th>Evidence Factor</th><th>Raw Score</th><th>Adjusted Score</th></tr></thead><tbody>
+      {% for t, s in opt.scores|dictsort %}<tr><td>{{ t }}</td><td>{{ s.history_years }}</td><td>{{ s.history_length_score|fmt_float }}</td><td>{{ s.market_regime_coverage_score|fmt_float }}</td><td>{{ s.drawdown_evidence_score|fmt_float }}</td><td>{{ s.observation_score|fmt_float }}</td><td>{{ s.evidence_score|fmt_float if s.evidence_score is not none else 'N/A' }}</td><td>{{ s.evidence_factor|fmt_float }}</td><td>{{ s.raw_score|fmt_float }}</td><td>{{ s.adjusted_score|fmt_float if s.adjusted_score is not none else 'N/A' }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% endif %}
+    {% if opt.optimized and opt.trades %}
+    <h3>Target Allocation / Rebalance Trade</h3>
+    <p class="meta">Constraints: Σw=1, 2% ≤ w ≤ 15%　·　No Trade Threshold: 1%　·　Balanced λ={{ opt.parameters.models.Balanced.lambda_tracking }}, γ={{ opt.parameters.models.Balanced.gamma_concentration }}</p>
+    <table><thead><tr><th>標的</th><th>Current Weight</th><th>Target Weight</th><th>Actual Weight</th><th>Target Value</th><th>Trade Value</th><th>Target Shares</th><th>Action</th></tr></thead><tbody>
+      {% for x in opt.trades %}<tr><td>{{ x.ticker }}</td><td>{{ x.current_weight|fmt_pct }}%</td><td>{{ x.target_weight|fmt_pct }}%</td><td>{{ x.actual_weight|fmt_pct }}%</td><td>{{ x.target_value|fmt_money }}</td><td>{{ x.trade_value|fmt_money }}</td><td>{{ x.target_shares if x.target_shares is not none else 'N/A' }}</td><td>{{ x.action }}</td></tr>{% endfor %}
+    </tbody></table>
+    <table><tbody><tr><td>Gross Trade Value</td><td>{{ opt.transaction_cost.gross_trade_value|fmt_money }}</td></tr><tr><td>Estimated Commission</td><td>{{ opt.transaction_cost.estimated_commission|fmt_money }}</td></tr><tr><td>Estimated Tax (sell only)</td><td>{{ opt.transaction_cost.estimated_tax|fmt_money }}</td></tr><tr><td>Estimated Slippage</td><td>{{ opt.transaction_cost.estimated_slippage|fmt_money }}</td></tr><tr><td>Estimated Total Transaction Cost</td><td>{{ opt.transaction_cost.estimated_total_transaction_cost|fmt_money }}</td></tr><tr><td>Transaction Cost / Portfolio Value</td><td>{{ opt.transaction_cost.transaction_cost_penalty|fmt_pct }}%</td></tr><tr><td>Cash Residual after whole shares</td><td>{{ opt.transaction_cost.cash_residual|fmt_money }}</td></tr></tbody></table>
+    {% elif opt.reason %}<p style="color:#b42318;"><b>Optimization Not Executed / Data Insufficient:</b> {{ opt.reason }}<br>N/A Reason: required common Daily Return Matrix, valid covariance and complete Evidence Score. Resolution: provide sufficient adjusted price observations.</p>
+    {% endif %}
+    {% if opt.sensitivity %}<h3>Lambda / Gamma Sensitivity</h3><table><thead><tr><th>Mode</th><th>λ</th><th>γ</th><th>CAGR</th><th>Vol</th><th>MDD</th><th>Sharpe</th><th>Max Weight</th><th>Top 5</th><th>Turnover</th></tr></thead><tbody>{% for x in opt.sensitivity %}<tr><td>{{ x.mode }}</td><td>{{ x.lambda_tracking }}</td><td>{{ x.gamma_concentration }}</td><td>{{ x.cagr|fmt_pct }}%</td><td>{{ x.volatility|fmt_pct }}%</td><td>{{ x.mdd|fmt_pct }}%</td><td>{{ x.sharpe|fmt_float }}</td><td>{{ x.maximum_weight|fmt_pct }}%</td><td>{{ x.top5_concentration|fmt_pct }}%</td><td>{{ x.turnover|fmt_pct }}%</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% if opt.concentration %}<h3>Concentration Analysis</h3><table><thead><tr><th>Metric</th><th>Current</th><th>Optimized</th><th>Direction</th></tr></thead><tbody><tr><td>Maximum Single Weight</td><td>{{ opt.concentration.current_max_weight|fmt_pct }}%</td><td>{{ opt.concentration.optimized_max_weight|fmt_pct }}%</td><td>Lower is better</td></tr><tr><td>Top 5 Concentration</td><td>{{ opt.concentration.current_top5|fmt_pct }}%</td><td>{{ opt.concentration.optimized_top5|fmt_pct }}%</td><td>Lower is better</td></tr><tr><td>HHI</td><td>{{ opt.concentration.current_hhi|fmt_float }}</td><td>{{ opt.concentration.optimized_hhi|fmt_float }}</td><td>Lower is better</td></tr></tbody></table>{% endif %}
+    {% if opt.stress_test %}<h3>Historical Stress Test</h3><table><thead><tr><th>Scenario</th><th>Status / MDD</th><th>N/A Reason</th></tr></thead><tbody>{% for name,x in opt.stress_test.items() %}<tr><td>{{ name }}</td><td>{% if x.mdd is defined %}MDD {{ x.mdd|fmt_pct }}%{% else %}N/A{% endif %}</td><td>{{ x.reason or '—' }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% set rmc = opt.retirement_monte_carlo or {} %}<h3>{% if opt.retirement_monte_carlo %}Retirement Monte Carlo Comparison{% else %}Retirement Comparison{% endif %}</h3>
+    {% if rmc.status == 'SUCCESS' %}<table><thead><tr><th>Metric</th><th>Current</th><th>Optimized</th><th>Difference</th></tr></thead><tbody>{% for key,label in [('success_rate','Success Rate'),('failure_rate','Failure Rate'),('median_ending_asset','Median Ending Asset'),('p5_ending_asset','P5 Ending Asset'),('p25_ending_asset','P25 Ending Asset'),('p75_ending_asset','P75 Ending Asset'),('p95_ending_asset','P95 Ending Asset'),('median_depletion_age','Median Depletion Age'),('p5_depletion_age','P5 Depletion Age')] %}<tr><td>{{ label }}</td><td>{{ rmc.current.get(key, 'N/A') }}</td><td>{{ rmc.optimized.get(key, 'N/A') }}</td><td>{% if rmc.current.get(key) is not none and rmc.optimized.get(key) is not none %}{{ rmc.optimized.get(key) - rmc.current.get(key) }}{% else %}N/A{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="meta">N/A — {{ rmc.reason or 'retirement inputs unavailable' }}</p>{% endif %}
+    {% if opt.validation %}<h3>Optimization Validation / Model Audit</h3><table><tbody>{% for k,v in opt.validation.items() %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    <p class="meta">公式：Portfolio Volatility = √(w′Σw)；Portfolio MDD = min(Equity / running peak − 1)；AdjustedScore = RawScore × (0.70 + 0.30 × EvidenceScore)。</p>
+  </div>
+
+  <div class="card warn">
+    <h2>八、研究限制提醒</h2>
+    <ul>
+      <li><b>倖存者偏差提示</b>：本名單是 2026 年仍存在的持股。若用來回測 2010-2020，這段期間下市的股票已被默默排除，會高估歷史報酬。</li>
+      <li><b>未來資訊偏差提示</b>：本工具使用的權重 / 持股是「現在的決定」，不模擬「當時不知道的未來」。</li>
+      <li><b>含息還原除權息（CAGR 為總報酬）</b>：原始 close 由 FinMind <code>TaiwanStockPrice</code> 提供，搭配 <code>dividends + splits</code> 以「股數追蹤法」逐日還原（配息當日以 close 再投入、split 調整股數），故本版 CAGR 為「總報酬」，含股利再投資效果。<br><b>注：</b>「〇 組合起始市值」用「當下原始收盤價」算市值，反映現實持倉金額；回測路徑（② / ⑤ / N 年滾動表 / Benchmark）用含息還原除權息價，兩者用途不同。</li>
+      <li><b>交易成本</b>：{% set fees = analyze.inputs.get('fees') or {} %}{% if fees.get('fee_buy') or fees.get('slippage') %}本版已扣買入手續費 {{ fees.fee_buy | fmt_pct(decimals=3) }}% + 滑價 {{ fees.slippage | fmt_pct(decimals=3) }}% (按右側 inputs 設定)。F2 提領按年初扣生活費、不另抽手續費與證交稅。{% else %}本版未計手續費 / 證交稅 / 滑價。實際買入需扣 0.1425% 手續費、賣出再扣 0.3% 證交稅。{% endif %}</li>
+      <li><b>情境推估語意</b>：P10/P50/P90 是「歷史上相同 N 年持有期間的結果分布」，<b>不是未來保證</b>。</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    Generated by stock-portfolio-forecast · 本報表為歷史回測情境參考，<b>不構成投資建議</b>
+  </div>
+</div>
+  <div class="card">
+    <h2>② 歷史真實績效明細表（每月）</h2>
+    <p class="hint">每個 ticker 的逐月報酬（compound）與年算術平均。</p>
+    {# Phase 6 (Item 1, 2): 標註 N / 實際起訖 / 實際年數 #}
+    <p style="color:#5a6a7e; font-size:13px; margin:0 0 8px;">
+      <b>N = {{ monthly_stats.n }} 年</b>　·
+      實際起訖：<b>{{ monthly_stats.actual_start }} ~ {{ monthly_stats.actual_end }}</b>　·
+      實際年數：<b>{{ monthly_stats.actual_years }} 年</b>
+      （限制到最近 N 年，避免混入全歷史 23 年資料）
+    </p>
+    {% if monthly_chart_svg %}
+    <h3 style="color:#17365d; margin:16px 0 6px;">📊 歷史 N 年累積報酬曲線（前 5 高）</h3>
+    <p class="hint">圖表直接使用下方明細表的月報酬複利，僅比較具完整 N 年月資料且期末累積報酬最高的 5 檔 ticker；歷史不足 N 年者不納入曲線，完整資料仍保留於下方表格。</p>
+    {{ monthly_chart_svg|safe }}
+    {% endif %}
+    {% for t in monthly_stats.tickers %}
+    <details style="margin-bottom:12px;"><summary><b>{{ t.ticker }}</b> ({{ t.first_year }}–{{ t.last_year }})</summary>
+      <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+        <thead><tr style="background:#f5f5f5;"><th>年</th>
+          {% for m in range(1, 13) %}<th>{{ m }}月</th>{% endfor %}
+          <th>年平均</th>
+        </tr></thead>
+        <tbody>
+        {% for y in t.data.keys()|sort %}
+          <tr><td><b>{{ y }}</b></td>
+            {% for m in range(1, 13) %}
+              {% set v = t.data[y].get(m|string) %}
+              <td style="text-align:right;">{% if v is none %}—{% else %}{{ "%.2f"|format(v*100) }}%{% endif %}</td>
+            {% endfor %}
+            {% set avg = t.data[y].get('year_avg') %}
+            <td style="text-align:right;font-weight:bold;">{% if avg is none %}—{% else %}{{ "%.2f"|format(avg*100) }}%{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endfor %}
+  </div>
+
+</body>
+</html>
